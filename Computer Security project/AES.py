@@ -141,95 +141,158 @@ def key_expansion(key):
     
     return round_keys
 
-def aes_encrypt(plaintext, key):
+def pkcs7_pad(data, block_size=16):
+    """Add PKCS7 padding to data"""
+    padding_length = block_size - (len(data) % block_size)
+    padding = bytes([padding_length] * padding_length)
+    return data + padding
+
+def pkcs7_unpad(data):
+    """Remove PKCS7 padding from data"""
+    padding_length = data[-1]
+    return data[:-padding_length]
+
+def aes_encrypt_block(plaintext_block, key, round_keys, block_num=1, show_details=True):
     """
-    AES-128 Encryption
+    Encrypt a single 16-byte block
     
     Args:
-        plaintext: 16 bytes of data to encrypt
+        plaintext_block: Exactly 16 bytes
         key: 16 bytes encryption key
+        round_keys: Pre-generated round keys
+        block_num: Block number for display
+        show_details: Whether to print detailed steps
     
     Returns:
         16 bytes of encrypted ciphertext
+    """
+    if show_details:
+        print("\n" + "="*60)
+        print(f"ENCRYPTING BLOCK {block_num}")
+        print("="*60)
+        print(f"Block plaintext: {plaintext_block.hex()}")
+    
+    # Convert plaintext to state
+    state = bytes_to_state(plaintext_block)
+    if show_details:
+        print_state(state, "Initial State")
+    
+    # Initial round - just AddRoundKey
+    if show_details:
+        print("\n" + "="*60)
+        print("INITIAL ROUND")
+        print("="*60)
+    state = add_round_key(state, round_keys[0])
+    if show_details:
+        print_state(state, "After Initial AddRoundKey")
+    
+    # Main rounds (1-9)
+    for round_num in range(1, 10):
+        if show_details:
+            print("\n" + "="*60)
+            print(f"ROUND {round_num}")
+            print("="*60)
+        state = sub_bytes(state)
+        state = shift_rows(state)
+        state = mix_columns(state)
+        state = add_round_key(state, round_keys[round_num])
+        if show_details:
+            print_state(state, f"State after Round {round_num}")
+    
+    # Final round (10) - no MixColumns
+    if show_details:
+        print("\n" + "="*60)
+        print("ROUND 10 (FINAL)")
+        print("="*60)
+    state = sub_bytes(state)
+    state = shift_rows(state)
+    state = add_round_key(state, round_keys[10])
+    if show_details:
+        print_state(state, "Final State")
+    
+    # Convert state to bytes
+    ciphertext = state_to_bytes(state)
+    
+    if show_details:
+        print(f"\nBlock ciphertext: {ciphertext.hex()}")
+    
+    return ciphertext
+
+def aes_encrypt(plaintext, key, show_details=True):
+    """
+    AES-128 Encryption (handles any length plaintext)
+    
+    Args:
+        plaintext: Data to encrypt (any length)
+        key: 16 bytes encryption key
+        show_details: Whether to print detailed steps
+    
+    Returns:
+        Encrypted ciphertext (padded to multiple of 16 bytes)
     """
     
     print("\n" + "="*60)
     print("AES-128 ENCRYPTION PROCESS")
     print("="*60)
     
-    # Validate inputs
-    if len(plaintext) != 16:
-        raise ValueError("Plaintext must be exactly 16 bytes")
     if len(key) != 16:
         raise ValueError("Key must be exactly 16 bytes (128 bits)")
     
-    print(f"\nPlaintext: {plaintext.hex()}")
-    print(f"Key:       {key.hex()}")
+    original_length = len(plaintext)
+    plaintext_padded = pkcs7_pad(plaintext)
     
-    # Generate round keys
+    print(f"\nOriginal plaintext length: {original_length} bytes")
+    print(f"Padded plaintext length:   {len(plaintext_padded)} bytes")
+    print(f"Plaintext (padded): {plaintext_padded.hex()}")
+    print(f"Key:                {key.hex()}")
+    
     round_keys = key_expansion(key)
     
-    # Convert plaintext to state
-    state = bytes_to_state(plaintext)
-    print_state(state, "Initial State")
+    ciphertext = b""
+    num_blocks = len(plaintext_padded) // 16
     
-    # Initial round - just AddRoundKey
-    print("\n" + "="*60)
-    print("INITIAL ROUND")
-    print("="*60)
-    state = add_round_key(state, round_keys[0])
-    print_state(state, "After Initial AddRoundKey")
+    print(f"\nNumber of blocks to encrypt: {num_blocks}")
     
-    # Main rounds (1-9)
-    for round_num in range(1, 10):
-        print("\n" + "="*60)
-        print(f"ROUND {round_num}")
-        print("="*60)
-        state = sub_bytes(state)
-        state = shift_rows(state)
-        state = mix_columns(state)
-        state = add_round_key(state, round_keys[round_num])
-        print_state(state, f"State after Round {round_num}")
-    
-    # Final round (10) - no MixColumns
-    print("\n" + "="*60)
-    print("ROUND 10 (FINAL)")
-    print("="*60)
-    state = sub_bytes(state)
-    state = shift_rows(state)
-    state = add_round_key(state, round_keys[10])
-    print_state(state, "Final State")
-    
-    # Convert state to bytes
-    ciphertext = state_to_bytes(state)
+    for i in range(num_blocks):
+        block_start = i * 16
+        block_end = block_start + 16
+        plaintext_block = plaintext_padded[block_start:block_end]
+        
+        
+        ciphertext_block = aes_encrypt_block(
+            plaintext_block, 
+            key, 
+            round_keys, 
+            block_num=i+1,
+            show_details=(show_details and i == 0)
+        )
+        
+        if i > 0 and show_details:
+            print(f"\nBlock {i+1} ciphertext: {ciphertext_block.hex()}")
+        
+        ciphertext += ciphertext_block
     
     print("\n" + "="*60)
     print("RESULT")
     print("="*60)
-    print(f"Ciphertext: {ciphertext.hex()}")
+    print(f"Total Ciphertext: {ciphertext.hex()}")
     
     return ciphertext
 
-# Example usage
 if __name__ == "__main__":
-    # Example 1: Simple message
-    plaintext = b"Hello AES-128!!!"  # Exactly 16 bytes
-    key = b"MySecretKey12345"  # Exactly 16 bytes
+    print("\n" + "="*60)
+    print("EXAMPLE 1: Short Message (needs padding)")
+    print("="*60)
+    plaintext = b"Hello!"  # Only 6 bytes
+    key = b"MySecretKey12345"  # 16 bytes
     
     ciphertext = aes_encrypt(plaintext, key)
     
     print("\n" + "="*60)
-    print("SUMMARY")
+    print("SUMMARY - EXAMPLE 1")
     print("="*60)
-    print(f"Plaintext:  {plaintext}")
-    print(f"Key:        {key}")
-    print(f"Ciphertext: {ciphertext.hex()}")
+    print(f"Original plaintext: {plaintext} ({len(plaintext)} bytes)")
+    print(f"Key:                {key}")
+    print(f"Ciphertext:         {ciphertext.hex()}")
     
-    # Example 2: Hex input
-    print("\n\n" + "="*60)
-    print("EXAMPLE 2: Using Hex Values")
-    print("="*60)
-    plaintext_hex = bytes.fromhex("00112233445566778899aabbccddeeff")
-    key_hex = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
     
-    ciphertext2 = aes_encrypt(plaintext_hex, key_hex)
